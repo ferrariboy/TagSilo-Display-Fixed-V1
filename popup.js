@@ -1791,6 +1791,50 @@ async function extractLinkedInMetadataInPage() {
   let image = "";
   let email = "";
 
+  const pause = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
+
+  /**
+   * Recover from a contact-info overlay left open by an earlier extension build.
+   * New extraction paths never open this overlay. This recovery only runs when
+   * LinkedIn's route explicitly identifies the contact-info overlay, so it does
+   * not close profile-image or unrelated dialogs.
+   */
+  const closeStaleTagSiloContactInfoOverlay = async () => {
+    const isContactInfoRoute = /\/overlay\/contact-info\/?$/i.test(window.location.pathname);
+    if (!isContactInfoRoute) return false;
+
+    const contactInfoRoot = document.querySelector(
+      ".pv-contact-info, #pv-contact-info, [data-view-name*='contact-info' i], [data-test-id*='contact-info' i]"
+    );
+    const dialog = contactInfoRoot?.closest(".artdeco-modal, [role='dialog'], dialog") || contactInfoRoot;
+    const dismissButton = dialog?.querySelector(
+      "button[aria-label*='dismiss' i], button[aria-label*='close' i], .artdeco-modal__dismiss, button[data-test-modal-close-btn]"
+    );
+
+    if (dismissButton instanceof HTMLElement) {
+      dismissButton.click();
+      await pause(100);
+    }
+
+    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true }));
+      await pause(100);
+    }
+
+    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
+      window.history.back();
+      await pause(175);
+    }
+
+    return !/\/overlay\/contact-info\/?$/i.test(window.location.pathname);
+  };
+
+  // A popup can be reopened after a legacy build left its routed overlay open.
+  // Restore the profile route before reading metadata so avatar/name selectors
+  // never read the dialog or image viewer instead of the profile card.
+  await closeStaleTagSiloContactInfoOverlay();
+
   // -------------------------------------------------------------
   // STEP 1: AVATAR IMAGE EXTRACTION (FROM MAIN PROFILE TOP CARD FIRST)
   // Scraped immediately from main profile DOM before touching any modal.
@@ -2130,96 +2174,32 @@ async function extractLinkedInMetadataInPage() {
     } catch (e) {}
   }
 
-  // 6C. Contact Info Modal Laser Trigger (Targets ONLY /overlay/contact-info/ link, excludes photos/avatars)
+  // 6C. Inspect an already-rendered contact-info panel without opening a LinkedIn overlay.
+  // Email discovery must not click the visible page: popup teardown would otherwise
+  // leave LinkedIn's SPA route/dialog active and poison the next popup open.
   if (!email) {
     try {
-      // 1. Check if Contact Info modal is already open
-      let modal = document.querySelector(".pv-contact-info") ||
-                  document.querySelector("section.ci-email") ||
-                  document.querySelector("#pv-contact-info") ||
-                  document.querySelector(".artdeco-modal");
-      if (modal) {
-        const mailtoModal = modal.querySelector('a[href^="mailto:"]');
+      const contactInfoRoot = document.querySelector(".pv-contact-info") ||
+                              document.querySelector("section.ci-email") ||
+                              document.querySelector("#pv-contact-info");
+      if (contactInfoRoot) {
+        const mailtoModal = contactInfoRoot.querySelector('a[href^="mailto:"]');
         if (mailtoModal) {
           const raw = mailtoModal.href.replace(/^mailto:/i, "").split("?")[0].trim();
           if (isUserEmail(raw)) email = raw;
         }
         if (!email) {
-          const found = findEmailInText(modal.innerText || modal.innerHTML);
+          const found = findEmailInText(contactInfoRoot.innerText || contactInfoRoot.innerHTML);
           if (found) email = found;
         }
       }
-
-      // 2. If modal not open, find and click ONLY the Contact Info link (strictly excluding photos/avatars)
-      if (!email) {
-        const isExcluded = (el) => {
-          if (!el) return true;
-          const cls = (el.className || "").toString().toLowerCase();
-          const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-          if (cls.includes("photo") || cls.includes("picture") || cls.includes("avatar") || cls.includes("image") || cls.includes("profile-picture")) return true;
-          if (aria.includes("photo") || aria.includes("picture") || aria.includes("avatar") || aria.includes("image") || aria.includes("edit profile")) return true;
-          if (el.querySelector("img, picture, svg.pv-top-card-profile-picture")) return true;
-          return false;
-        };
-
-        let contactBtn = document.querySelector('a[href*="/overlay/contact-info/"]') ||
-                         document.querySelector('a#top-card-text-details-contact-info') ||
-                         document.querySelector('a.ember-view[href*="contact-info"]') ||
-                         document.querySelector('a[data-control-name="contact_see_more"]');
-
-        if (!contactBtn || isExcluded(contactBtn)) {
-          const candidateLinks = document.querySelectorAll(".pv-text-details__left-panel a, .ph5 a, main a");
-          for (const l of candidateLinks) {
-            if (isExcluded(l)) continue;
-            const href = (l.getAttribute("href") || "").toLowerCase();
-            const text = (l.innerText || l.textContent || "").trim().toLowerCase();
-            if (href.includes("overlay/contact-info") || text === "contact info" || (text.includes("contact info") && !text.includes("photo"))) {
-              contactBtn = l;
-              break;
-            }
-          }
-        }
-
-        if (contactBtn && !isExcluded(contactBtn)) {
-          contactBtn.click();
-
-          // Wait up to 1200ms for modal content to mount
-          const start = Date.now();
-          while (Date.now() - start < 1200) {
-            await new Promise((r) => setTimeout(r, 100));
-            const poppedModal = document.querySelector(".pv-contact-info") ||
-                                document.querySelector("section.ci-email") ||
-                                document.querySelector("#pv-contact-info") ||
-                                document.querySelector(".artdeco-modal");
-            if (poppedModal) {
-              const mailto = poppedModal.querySelector('a[href^="mailto:"]');
-              if (mailto) {
-                const raw = mailto.href.replace(/^mailto:/i, "").split("?")[0].trim();
-                if (isUserEmail(raw)) { email = raw; break; }
-              }
-              const found = findEmailInText(poppedModal.innerText || poppedModal.innerHTML);
-              if (found) { email = found; break; }
-            }
-          }
-
-          // Cleanly dismiss the modal after reading to leave page pristine
-          const poppedModal = document.querySelector(".artdeco-modal") || document.querySelector(".pv-contact-info");
-          if (poppedModal) {
-            const dismissBtn = poppedModal.querySelector('button[aria-label="Dismiss"]') ||
-                               poppedModal.querySelector('.artdeco-modal__dismiss') ||
-                               poppedModal.querySelector('button[data-test-modal-close-btn]');
-            if (dismissBtn) {
-              try { dismissBtn.click(); } catch (e) {}
-            }
-          }
-        }
-      }
     } catch (e) {
-      console.warn("[TagSilo] In-page contact-info note:", e);
+      console.warn("[TagSilo] Passive contact-info read note:", e);
     }
   }
 
-  // 6D. Asynchronous Background Contact Info Fetch Fallback
+  // 6D. Silent contact-info endpoint fetch fallback. This performs no clicks,
+  // navigation, or DOM mutations in the LinkedIn tab.
   if (!email && location.hostname.includes("linkedin.com") && location.pathname.includes("/in/")) {
     try {
       const baseUrl = location.origin + location.pathname.replace(/\/overlay\/contact-info\/?.*$/i, "").replace(/\/$/, "");

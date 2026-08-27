@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TagSilo Pro",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Display Fixed V1 — accessible LinkedIn pipeline tracker, smart tagger, and automated Google Sheets sync.",
   "permissions": [
     "storage",
