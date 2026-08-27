@@ -496,11 +496,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (extracted) {
         extracted.url = cleanUrl;
 
-        console.log("[TagSilo Pro] Extracted profile data:", JSON.stringify(extracted, null, 2));
-
         // A managed Contact Info check has already completed at this point. Do not
         // leave the UI in the live “Searching…” state when that check found no email.
-        const managedEmailLookupCompleted = extracted.contactInfoDiagnostics?.source === "managed-contact-info-dialog";
+        const managedEmailLookupCompleted = extracted.contactInfoReadComplete === true;
         applyExtractedProfile(extracted, !managedEmailLookupCompleted);
 
         // Save dataset immediately to browser local memory
@@ -738,70 +736,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       savedAt: new Date().toISOString()
     };
     await chrome.storage.local.set({ cached_profile_data: packet });
-  }
-
-  // Overlay Contact Info Email Fetcher via background relay (/overlay/contact-info/)
-  async function fetchOverlayContactEmail(profileUrl) {
-    if (!profileUrl || !profileUrl.includes("linkedin.com/in/")) {
-      updateEmailBadge("Cannot Find", false);
-      if (leadEmailInput) leadEmailInput.value = "Email: Cannot Find";
-      return "Cannot Find";
-    }
-
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: "FETCH_EMAIL",
-        profileUrl
-      });
-
-      if (response && response.success && response.diagnostics) {
-        console.info("[TagSilo] Background Contact Info diagnostics:", response.diagnostics);
-      }
-
-      if (response && response.success) {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(response.html || "", "text/html");
-
-        const genericMatch = (doc.body?.textContent || response.html || "").match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
-        const parsedEmail = response.email || genericMatch?.[1] || "";
-        if (parsedEmail && !/@(?:linkedin|licdn|example)\.com$/i.test(parsedEmail) && !/^(support|info|help|no-reply|donotreply)@/i.test(parsedEmail)) {
-          currentExtractedEmail = parsedEmail.trim();
-          updateEmailBadge(currentExtractedEmail, false);
-          if (leadEmailInput) leadEmailInput.value = `Email: ${currentExtractedEmail}`;
-          await cacheProfileData({ email: currentExtractedEmail });
-          return currentExtractedEmail;
-        }
-
-        const mailtoLink = doc.querySelector('a[href^="mailto:"]');
-        if (mailtoLink) {
-          const emailText = mailtoLink.innerText.trim() || mailtoLink.getAttribute("href").replace(/^mailto:/i, "").trim();
-          if (emailText && emailText.includes("@")) {
-            currentExtractedEmail = emailText;
-            updateEmailBadge(emailText, false);
-            if (leadEmailInput) leadEmailInput.value = `Email: ${emailText}`;
-            await cacheProfileData({ email: emailText });
-            return emailText;
-          }
-        }
-
-        const emailMatch = (response.html || "").match(/href=["']mailto:([^"'?]+)["']/i) ||
-                           (response.html || "").match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
-        if (emailMatch && emailMatch[1]) {
-          const cleanEmail = emailMatch[1].trim();
-          currentExtractedEmail = cleanEmail;
-          updateEmailBadge(cleanEmail, false);
-          if (leadEmailInput) leadEmailInput.value = `Email: ${cleanEmail}`;
-          await cacheProfileData({ email: cleanEmail });
-          return cleanEmail;
-        }
-      }
-    } catch (err) {
-      console.warn("[TagSilo Pro] Contact email fetch note:", err);
-    }
-
-    updateEmailBadge("Cannot Find", false);
-    if (leadEmailInput) leadEmailInput.value = "Email: Cannot Find";
-    return "Cannot Find";
   }
 
   // Refresh Metadata Button Click
@@ -1642,7 +1576,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
           if (!freshToken) {
             // Prompt 1-click interactive re-authorization to renew the token seamlessly
-            console.log("[TagSilo Pro] Silent token refresh unavailable. Launching Google authorization window...");
             const authResult = await authenticateWithGoogle(true);
             freshToken = authResult?.token || null;
           }
@@ -1826,18 +1759,7 @@ async function extractLinkedInMetadataInPage() {
   let title = "";
   let image = "";
   let email = "";
-  const contactInfoDiagnostics = {
-    attempted: false,
-    status: null,
-    redirected: false,
-    finalPath: "",
-    contentType: "",
-    responseLength: 0,
-    containsEmailLabel: false,
-    containsMailtoLink: false,
-    emailFound: false,
-    error: ""
-  };
+  let contactInfoReadComplete = false;
 
   const pause = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
   const contactInfoRootSelector = ".pv-contact-info, section.ci-email, #pv-contact-info, [data-view-name*='contact-info' i], [data-test-id*='contact-info' i]";
@@ -2253,28 +2175,6 @@ async function extractLinkedInMetadataInPage() {
     return findEmailInText(normalizedText);
   };
 
-  const logContactInfoSurfaceDiagnostics = (expectedPath) => {
-    const candidates = Array.from(document.querySelectorAll(
-      ".artdeco-modal, [role='dialog'], dialog, [aria-modal='true'], main, [role='main']"
-    )).filter(isVisibleElement).slice(0, 12).map((element) => {
-      const text = element.innerText || element.textContent || "";
-      return {
-        tag: element.tagName.toLowerCase(),
-        role: element.getAttribute("role") || "",
-        testId: element.getAttribute("data-testid") || element.getAttribute("data-test-id") || "",
-        viewName: element.getAttribute("data-view-name") || "",
-        hasContactLabel: /contact\s*(info|information)/i.test(text),
-        hasEmailLabel: /\bemail\b/i.test(text),
-        hasAtSymbol: text.includes("@"),
-        textLength: text.length
-      };
-    });
-    console.info("[TagSilo] Contact Info surface diagnostics:", {
-      onExpectedRoute: window.location.pathname.replace(/\/$/, "") === expectedPath,
-      visibleSurfaces: candidates
-    });
-  };
-
   const waitForContactInfoEmail = async (expectedPath, timeoutMs = 4500) => {
     const deadline = Date.now() + timeoutMs;
     let lastDialog = null;
@@ -2344,7 +2244,6 @@ async function extractLinkedInMetadataInPage() {
         console.warn("[TagSilo] Managed Contact Info read note:", error);
         return "";
       } finally {
-        logContactInfoSurfaceDiagnostics(expectedPath);
         if (openedByThisRun) await restoreContactInfoRoute(expectedPath);
       }
     };
@@ -2408,10 +2307,8 @@ async function extractLinkedInMetadataInPage() {
   // profile Contact Info anchor and keeps the entire operation alive in the
   // LinkedIn tab even when the extension popup is closed or reopened.
   if (!email && location.hostname.includes("linkedin.com") && location.pathname.includes("/in/")) {
-    contactInfoDiagnostics.attempted = true;
     email = await readEmailViaManagedContactInfoDialog();
-    contactInfoDiagnostics.emailFound = Boolean(email);
-    contactInfoDiagnostics.source = "managed-contact-info-dialog";
+    contactInfoReadComplete = true;
   }
 
   // 6E. Fallback search in document text
@@ -2432,6 +2329,6 @@ async function extractLinkedInMetadataInPage() {
     avatarUrl: image || "",
     url: cleanUrl,
     email: email || "Cannot Find",
-    contactInfoDiagnostics
+    contactInfoReadComplete
   };
 }

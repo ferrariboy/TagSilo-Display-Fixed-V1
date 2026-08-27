@@ -1,25 +1,10 @@
 /**
  * TagSilo Pro - Background Service Worker (Manifest V3)
  * Persistent Background Traffic Handler, Anti-Duplicate Google Sheets Sync Engine,
- * Express Backend API Connector, and /overlay/contact-info/ Asynchronous Fetch Relay.
+ * Express Backend API Connector.
  */
 
 const DEFAULT_BACKEND_ENDPOINT = "https://tagsilo.vercel.app";
-const CONTACT_EMAIL_PATTERN = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
-
-function findContactEmailInHtml(html) {
-  if (!html || typeof html !== "string") return "";
-
-  const normalized = html.replace(/&commat;/gi, "@").replace(/&#64;/gi, "@");
-  const matches = normalized.match(CONTACT_EMAIL_PATTERN) || [];
-  return matches.find((candidate) => {
-    const email = candidate.trim().toLowerCase();
-    return !email.endsWith("@linkedin.com") &&
-      !email.endsWith("@licdn.com") &&
-      !email.endsWith("@example.com") &&
-      !/^(support|info|help|no-reply|donotreply)@/.test(email);
-  }) || "";
-}
 
 // Initialize default storage on installation without overwriting user data
 chrome.runtime.onInstalled.addListener(async () => {
@@ -75,15 +60,7 @@ chrome.runtime.onInstalled.addListener(async () => {
  * Persistent background message listener with async callback wrapper
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 1. FETCH_EMAIL: Background contact-info overlay fetch handler
-  if (message.action === "FETCH_EMAIL" || message.type === "FETCH_EMAIL") {
-    handleFetchContactEmail(message.profileUrl)
-      .then((data) => sendResponse({ success: true, ...data }))
-      .catch((err) => sendResponse({ success: false, error: err.message, html: "" }));
-    return true; // Keep message channel open for asynchronous reply
-  }
-
-  // 2. CHECK_EXISTING_PROFILE: Duplicate prevention lookup in Google Sheets
+  // 1. CHECK_EXISTING_PROFILE: Duplicate prevention lookup in Google Sheets
   if (message.action === "CHECK_EXISTING_PROFILE" || message.type === "CHECK_EXISTING_PROFILE") {
     checkExistingProfileInSheet(message.profileUrl, message.googleAuthToken)
       .then((result) => sendResponse({ success: true, ...result }))
@@ -91,7 +68,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // 3. CHECK_SYNC_CAP: Validate 24-hour freemium usage
+  // 2. CHECK_SYNC_CAP: Validate 24-hour freemium usage
   if (message.action === "CHECK_SYNC_CAP" || message.type === "CHECK_SYNC_CAP") {
     checkDailySyncCap()
       .then((status) => sendResponse({ success: true, status }))
@@ -99,7 +76,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // 4. VALIDATE_LICENSE: Node.js / Express backend license verification
+  // 3. VALIDATE_LICENSE: Node.js / Express backend license verification
   if (message.action === "VALIDATE_LICENSE" || message.type === "VALIDATE_LICENSE") {
     validateCreemLicense(message.licenseKey)
       .then((result) => sendResponse({ success: true, result }))
@@ -107,7 +84,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // 5. EXECUTE_SYNC: Forward payload with anti-duplicate logic
+  // 4. EXECUTE_SYNC: Forward payload with anti-duplicate logic
   if (message.action === "EXECUTE_SYNC" || message.type === "EXECUTE_SYNC") {
     handlePipelineSync(message.profileData, message.googleAuthToken, message.creemLicenseKey)
       .then((result) => sendResponse({ success: true, ...result }))
@@ -117,59 +94,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
-
-/**
- * Fetch LinkedIn Contact Info Overlay HTML asynchronously
- */
-async function handleFetchContactEmail(profileUrl) {
-  if (!profileUrl || typeof profileUrl !== "string") {
-    throw new Error("Invalid profile URL provided.");
-  }
-
-  const cleanUrl = profileUrl.split("?")[0].split("#")[0].replace(/\/overlay\/contact-info\/?.*$/i, "").replace(/\/$/, "");
-  const contactInfoUrl = cleanUrl + "/overlay/contact-info/";
-
-  try {
-    const res = await fetch(contactInfoUrl, {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    });
-
-    if (res.ok) {
-      const html = await res.text();
-      const email = findContactEmailInHtml(html);
-      const diagnostics = {
-        redirected: res.redirected,
-        finalPath: new URL(res.url || contactInfoUrl).pathname,
-        contentType: res.headers.get("content-type") || "",
-        responseLength: html.length,
-        containsEmailLabel: /\bemail\b/i.test(html),
-        containsMailtoLink: /mailto:/i.test(html)
-      };
-      if (email) return { html, email, status: res.status, source: "fetch", diagnostics };
-      return { html, email: "", status: res.status, source: "fetch", diagnostics };
-    }
-
-    return {
-      html: "",
-      email: "",
-      status: res.status,
-      source: "fetch",
-      diagnostics: {
-        redirected: res.redirected,
-        finalPath: new URL(res.url || contactInfoUrl).pathname,
-        contentType: res.headers.get("content-type") || ""
-      }
-    };
-  } catch (err) {
-    console.warn("[TagSilo Background] Overlay fetch exception:", err);
-    return { html: "", email: "", error: err.message, source: "fetch" };
-  }
-}
 
 /**
  * Universal Cross-Browser Token Provider & Silent Proactive Auto-Renewal Engine

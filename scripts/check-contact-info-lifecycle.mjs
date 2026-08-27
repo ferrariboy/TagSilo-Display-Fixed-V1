@@ -26,7 +26,7 @@ assert(
   "The Contact Info dialog must be coordinated as a single per-tab transaction."
 );
 assert(
-  popupSource.includes("Contact Info surface diagnostics") && popupSource.includes("[aria-modal='true']") && popupSource.includes("routedSurface"),
+  popupSource.includes("[aria-modal='true']") && popupSource.includes("routedSurface"),
   "The reader must inspect the visible modern Contact Info surface when legacy modal classes are absent."
 );
 assert(
@@ -38,7 +38,7 @@ assert(
   "Every Contact Info read must restore the profile route even when the popup closes or the email is absent."
 );
 assert(
-  popupSource.includes("managedEmailLookupCompleted") && popupSource.includes("applyExtractedProfile(extracted, !managedEmailLookupCompleted)"),
+  popupSource.includes("contactInfoReadComplete") && popupSource.includes("applyExtractedProfile(extracted, !managedEmailLookupCompleted)"),
   "A completed managed email lookup must resolve the popup UI rather than leaving it in a searching state."
 );
 assert(
@@ -50,20 +50,8 @@ assert(
   "The Contact Info read must not create a secondary browser tab."
 );
 assert(
-  popupSource.includes('action: "FETCH_EMAIL"'),
-  "The popup must retain the background email-fetch fallback."
-);
-assert(
-  backgroundSource.includes("handleFetchContactEmail") && backgroundSource.includes("/overlay/contact-info/"),
-  "The service worker must retain the silent Contact Info endpoint fetcher."
-);
-assert(
-  backgroundSource.includes("findContactEmailInHtml") && popupSource.includes("world: \"MAIN\"") && popupSource.includes("response.email"),
-  "The non-visual Contact Info path must parse direct responses and run the primary request in LinkedIn's page context."
-);
-assert(
-  !backgroundSource.includes("readContactEmailInInactiveTab") && !backgroundSource.includes("chrome.tabs.create({ url: contactInfoUrl"),
-  "The contact-email retrieval path must not open an additional browser tab."
+  !popupSource.includes("fetchOverlayContactEmail") && !backgroundSource.includes("handleFetchContactEmail"),
+  "The production email path must not retain unused direct-request fallback code."
 );
 assert(
   popupSource.includes("const getProfileAvatarUrl") && popupSource.includes("bestCandidate") && contentSource.includes("bestCandidate"),
@@ -72,6 +60,10 @@ assert(
 assert(
   !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
   "Avatar extraction must avoid global metadata and unscoped image selectors."
+);
+assert(
+  !popupSource.includes("Contact Info surface diagnostics") && !popupSource.includes("Extracted profile data:"),
+  "Temporary Contact Info diagnostics and profile dumps must not ship in production."
 );
 assert(manifest.version === "1.3.9", "The manifest version must reflect the lifecycle fix.");
 

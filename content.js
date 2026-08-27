@@ -306,7 +306,6 @@ async function tryCapture(retries = 10) {
         lastCapture: data,
         cached_profile_data: data
       });
-      console.log('[TagSilo Content Script] Successfully captured profile:', data);
     } else if (retries > 0) {
       setTimeout(() => {
         isCapturing = false;
