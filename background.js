@@ -143,60 +143,14 @@ async function handleFetchContactEmail(profileUrl) {
       const html = await res.text();
       const email = findContactEmailInHtml(html);
       if (email) return { html, email, status: 200, source: "fetch" };
+      return { html, email: "", status: 200, source: "fetch" };
     }
+
+    return { html: "", email: "", status: res.status, source: "fetch" };
   } catch (err) {
     console.warn("[TagSilo Background] Overlay fetch exception:", err);
+    return { html: "", email: "", error: err.message, source: "fetch" };
   }
-
-  // Some signed-in LinkedIn sessions do not return contact details to an extension
-  // fetch. Read the same endpoint in an inactive extension-created tab, then close
-  // it immediately. The user's active profile tab is never clicked or navigated.
-  return readContactEmailInInactiveTab(contactInfoUrl);
-}
-
-async function readContactEmailInInactiveTab(contactInfoUrl) {
-  let contactTabId;
-  try {
-    const contactTab = await chrome.tabs.create({ url: contactInfoUrl, active: false });
-    contactTabId = contactTab.id;
-    if (!contactTabId) throw new Error("Unable to create an inactive Contact Info tab.");
-
-    await waitForTabToFinishLoading(contactTabId, 8000);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const response = await chrome.tabs.sendMessage(contactTabId, { action: "GET_CONTACT_INFO_EMAIL" });
-    const email = response?.success ? response.email : "";
-    return { html: "", email: email || "", status: 200, source: "inactive-tab" };
-  } catch (error) {
-    console.warn("[TagSilo Background] Inactive Contact Info read note:", error);
-    return { html: "", email: "", error: error.message };
-  } finally {
-    if (contactTabId) {
-      try {
-        await chrome.tabs.remove(contactTabId);
-      } catch (error) {}
-    }
-  }
-}
-
-function waitForTabToFinishLoading(tabId, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (callback) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(onUpdated);
-      callback();
-    };
-    const onUpdated = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") finish(resolve);
-    };
-    const timeoutId = setTimeout(() => finish(() => reject(new Error("Timed out loading Contact Info."))), timeoutMs);
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.get(tabId).then((tab) => {
-      if (tab.status === "complete") finish(resolve);
-    }).catch(() => {});
-  });
 }
 
 /**

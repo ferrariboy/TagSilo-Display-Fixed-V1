@@ -177,7 +177,10 @@ async function extractEmail() {
       const baseUrl = location.origin + location.pathname.replace(/\/overlay\/contact-info\/?.*$/i, '').replace(/\/$/, '');
       const contactUrl = baseUrl + '/overlay/contact-info/';
       const response = await fetch(contactUrl, {
-        headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
         credentials: 'include'
       });
       if (response.ok) {

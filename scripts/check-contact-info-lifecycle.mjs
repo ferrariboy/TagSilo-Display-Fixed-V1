@@ -34,8 +34,12 @@ assert(
   "The service worker must retain the silent Contact Info endpoint fetcher."
 );
 assert(
-  backgroundSource.includes("findContactEmailInHtml") && backgroundSource.includes("readContactEmailInInactiveTab") && popupSource.includes("response.email"),
-  "The non-visual Contact Info path must parse visible email text and fall back to an inactive tab."
+  backgroundSource.includes("findContactEmailInHtml") && popupSource.includes("world: \"MAIN\"") && popupSource.includes("response.email"),
+  "The non-visual Contact Info path must parse direct responses and run the primary request in LinkedIn's page context."
+);
+assert(
+  !backgroundSource.includes("readContactEmailInInactiveTab") && !backgroundSource.includes("chrome.tabs.create({ url: contactInfoUrl"),
+  "The contact-email retrieval path must not open an additional browser tab."
 );
 assert(
   popupSource.includes("const getProfileAvatarUrl") && popupSource.includes("bestCandidate") && contentSource.includes("bestCandidate"),
@@ -45,6 +49,6 @@ assert(
   !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
   "Avatar extraction must avoid global metadata and unscoped image selectors."
 );
-assert(manifest.version === "1.3.3", "The manifest version must reflect the lifecycle fix.");
+assert(manifest.version === "1.3.4", "The manifest version must reflect the lifecycle fix.");
 
 console.log("Contact Info lifecycle checks passed.");
