@@ -2205,19 +2205,74 @@ async function extractLinkedInMetadataInPage() {
     return "";
   };
 
+  const isVisibleElement = (element) => {
+    if (!(element instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+  };
+
   const getContactInfoDialog = () => {
-    const root = getContactInfoRoot();
-    if (!root) return null;
-    const dialog = root.closest(".artdeco-modal, [role='dialog'], dialog") || root;
-    return { root, dialog };
+    const namedRoot = getContactInfoRoot();
+    if (namedRoot && isVisibleElement(namedRoot)) {
+      return { root: namedRoot, dialog: namedRoot.closest(".artdeco-modal, [role='dialog'], dialog") || namedRoot };
+    }
+
+    const dialogCandidates = Array.from(document.querySelectorAll(
+      ".artdeco-modal, [role='dialog'], dialog, [aria-modal='true']"
+    )).filter(isVisibleElement);
+    const contactDialog = dialogCandidates.find((candidate) => {
+      const text = (candidate.innerText || candidate.textContent || "").toLowerCase();
+      return /contact\s*(info|information)/i.test(text) || candidate.querySelector('a[href^="mailto:"]');
+    });
+    if (contactDialog) return { root: contactDialog, dialog: contactDialog };
+
+    // Current LinkedIn layout can render a routed overlay without legacy modal
+    // classes. On the exact Contact Info route, use only the visible main surface.
+    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
+      const routedSurface = Array.from(document.querySelectorAll("main, [role='main']")).find(isVisibleElement);
+      if (routedSurface) return { root: routedSurface, dialog: routedSurface };
+    }
+
+    return null;
   };
 
   const readEmailFromContactInfo = (root) => {
     const mailto = root?.querySelector('a[href^="mailto:"]');
     const raw = mailto?.href.replace(/^mailto:/i, "").split("?")[0].trim() || "";
-    return isUserEmail(raw)
-      ? raw
-      : findEmailInText(root?.innerText || root?.textContent || root?.innerHTML || "");
+    if (isUserEmail(raw)) return raw;
+
+    const text = root?.innerText || root?.textContent || root?.innerHTML || "";
+    const inlineEmail = findEmailInText(text);
+    if (inlineEmail) return inlineEmail;
+
+    // LinkedIn occasionally renders mail address characters across inline nodes.
+    // Normalizing whitespace recovers addresses split by styling spans without
+    // broadening extraction beyond the confirmed Contact Info surface.
+    const normalizedText = text.replace(/\s+/g, "");
+    return findEmailInText(normalizedText);
+  };
+
+  const logContactInfoSurfaceDiagnostics = (expectedPath) => {
+    const candidates = Array.from(document.querySelectorAll(
+      ".artdeco-modal, [role='dialog'], dialog, [aria-modal='true'], main, [role='main']"
+    )).filter(isVisibleElement).slice(0, 12).map((element) => {
+      const text = element.innerText || element.textContent || "";
+      return {
+        tag: element.tagName.toLowerCase(),
+        role: element.getAttribute("role") || "",
+        testId: element.getAttribute("data-testid") || element.getAttribute("data-test-id") || "",
+        viewName: element.getAttribute("data-view-name") || "",
+        hasContactLabel: /contact\s*(info|information)/i.test(text),
+        hasEmailLabel: /\bemail\b/i.test(text),
+        hasAtSymbol: text.includes("@"),
+        textLength: text.length
+      };
+    });
+    console.info("[TagSilo] Contact Info surface diagnostics:", {
+      onExpectedRoute: window.location.pathname.replace(/\/$/, "") === expectedPath,
+      visibleSurfaces: candidates
+    });
   };
 
   const waitForContactInfoEmail = async (expectedPath, timeoutMs = 4500) => {
@@ -2289,6 +2344,7 @@ async function extractLinkedInMetadataInPage() {
         console.warn("[TagSilo] Managed Contact Info read note:", error);
         return "";
       } finally {
+        logContactInfoSurfaceDiagnostics(expectedPath);
         if (openedByThisRun) await restoreContactInfoRoute(expectedPath);
       }
     };

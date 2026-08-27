@@ -13,8 +13,8 @@ const [manifestRaw, popupCss, popupJs, optionsHtml, optionsJs] = await Promise.a
 const failures = [];
 const manifest = JSON.parse(manifestRaw);
 
-if (manifest.version !== "1.3.8") {
-  failures.push(`Expected manifest version 1.3.8, received ${manifest.version}.`);
+if (manifest.version !== "1.3.9") {
+  failures.push(`Expected manifest version 1.3.9, received ${manifest.version}.`);
 }
 
 const forbiddenPopupPatterns = [
