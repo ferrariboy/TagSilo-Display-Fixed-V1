@@ -6,6 +6,8 @@
  */
 
 const DEFAULT_SERVER_URL = "https://tagsilo.vercel.app";
+const UI_DENSITY_KEY = "tagsilo_ui_density";
+const UI_DENSITIES = new Set(["standard", "comfortable"]);
 
 document.addEventListener("DOMContentLoaded", async () => {
   // DOM References
@@ -56,6 +58,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Toast
   const saveToast = document.getElementById("saveToast");
   const saveToastMsg = document.getElementById("saveToastMsg");
+  const displayDensityInputs = document.querySelectorAll('input[name="uiDensity"]');
 
   // Local State
   let tagsList = [];
@@ -89,7 +92,64 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const GATING_WARNING_MESSAGE = "Premium Account Feature: Please activate a valid Pro License Key to build unlimited tracking pipelines.";
 
+  function normalizeUiDensity(value) {
+    return UI_DENSITIES.has(value) ? value : "standard";
+  }
+
+  function setDensityControlValue(value) {
+    const density = normalizeUiDensity(value);
+    displayDensityInputs.forEach((input) => {
+      input.checked = input.value === density;
+    });
+  }
+
+  async function loadDisplayDensity() {
+    let density = "standard";
+    let hasSyncedDensity = false;
+
+    try {
+      const synced = await chrome.storage.sync.get(UI_DENSITY_KEY);
+      if (UI_DENSITIES.has(synced[UI_DENSITY_KEY])) {
+        density = synced[UI_DENSITY_KEY];
+        hasSyncedDensity = true;
+      }
+    } catch (error) {
+      console.warn("[TagSilo Options] Display density sync load note:", error);
+    }
+
+    if (!hasSyncedDensity) {
+      try {
+        const local = await chrome.storage.local.get(UI_DENSITY_KEY);
+        if (UI_DENSITIES.has(local[UI_DENSITY_KEY])) {
+          density = local[UI_DENSITY_KEY];
+        }
+      } catch (error) {
+        console.warn("[TagSilo Options] Display density local load note:", error);
+      }
+    }
+
+    setDensityControlValue(density);
+  }
+
+  async function saveDisplayDensity(value) {
+    const density = normalizeUiDensity(value);
+    await chrome.storage.local.set({ [UI_DENSITY_KEY]: density });
+    try {
+      await chrome.storage.sync.set({ [UI_DENSITY_KEY]: density });
+    } catch (error) {
+      console.warn("[TagSilo Options] Display density sync save note:", error);
+    }
+    showToast(`Popup density set to ${density === "comfortable" ? "Comfortable" : "Standard"}`);
+  }
+
+  displayDensityInputs.forEach((input) => {
+    input.addEventListener("change", async () => {
+      if (input.checked) await saveDisplayDensity(input.value);
+    });
+  });
+
   // Initialize
+  await loadDisplayDensity();
   await loadAllSettings();
 
   async function loadAllSettings() {

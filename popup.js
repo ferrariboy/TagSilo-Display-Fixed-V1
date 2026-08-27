@@ -8,6 +8,8 @@
 
 const DEFAULT_VERCEL_URL = "https://tagsilo.vercel.app";
 const DEFAULT_SUPABASE_URL = "https://wrmzlyffpfdnphmqujfe.supabase.co";
+const UI_DENSITY_KEY = "tagsilo_ui_density";
+const UI_DENSITIES = new Set(["standard", "comfortable"]);
 
 const DEFAULT_TAGS = [
   "High Priority",
@@ -174,8 +176,47 @@ document.addEventListener("DOMContentLoaded", async () => {
   let isProfileAlreadySaved = false;
   let backendApiUrl = DEFAULT_VERCEL_URL;
 
+  function normalizeUiDensity(value) {
+    return UI_DENSITIES.has(value) ? value : "standard";
+  }
+
+  async function applySavedDisplayDensity() {
+    let savedDensity = "standard";
+    let hasSyncedDensity = false;
+
+    try {
+      const synced = await chrome.storage.sync.get(UI_DENSITY_KEY);
+      if (UI_DENSITIES.has(synced[UI_DENSITY_KEY])) {
+        savedDensity = synced[UI_DENSITY_KEY];
+        hasSyncedDensity = true;
+      }
+    } catch (error) {
+      console.warn("[TagSilo Pro] Display density sync load note:", error);
+    }
+
+    if (!hasSyncedDensity) {
+      try {
+        const local = await chrome.storage.local.get(UI_DENSITY_KEY);
+        if (UI_DENSITIES.has(local[UI_DENSITY_KEY])) {
+          savedDensity = local[UI_DENSITY_KEY];
+        }
+      } catch (error) {
+        console.warn("[TagSilo Pro] Display density local load note:", error);
+      }
+    }
+
+    document.documentElement.dataset.density = normalizeUiDensity(savedDensity);
+  }
+
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes[UI_DENSITY_KEY]) {
+      document.documentElement.dataset.density = normalizeUiDensity(changes[UI_DENSITY_KEY].newValue);
+    }
+  });
+
   // 1. Initial State Load & Cache Hydration
   try {
+    await applySavedDisplayDensity();
     await initializeApp();
   } catch (initErr) {
     console.error("[TagSilo Pro] initializeApp error:", initErr);

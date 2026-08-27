@@ -61,7 +61,35 @@
         </div>
       </section>
 
-      <!-- 2. Direct Google Sheet Pipeline Navigation Module -->
+      <!-- 2. Display Density & Readability Module -->
+      <section class="options-card display-density-card">
+        <div class="card-title-row">
+          <div class="card-icon" aria-hidden="true">Aa</div>
+          <div>
+            <h2 class="card-title">Popup Display Density</h2>
+            <p id="densityHelp" class="card-desc">Choose the most comfortable reading size for TagSilo. This setting respects your Windows display scaling and Chrome zoom; it does not alter them.</p>
+          </div>
+        </div>
+        <fieldset class="display-density-control" aria-describedby="densityHelp">
+          <legend class="sr-only">Popup display density</legend>
+          <label class="display-density-option">
+            <input type="radio" name="uiDensity" value="standard" checked>
+            <span class="display-density-option-content">
+              <strong>Standard</strong>
+              <small>Balanced density for everyday prospecting.</small>
+            </span>
+          </label>
+          <label class="display-density-option">
+            <input type="radio" name="uiDensity" value="comfortable">
+            <span class="display-density-option-content">
+              <strong>Comfortable</strong>
+              <small>Larger labels, fields, and controls. Content may scroll.</small>
+            </span>
+          </label>
+        </fieldset>
+      </section>
+
+      <!-- 3. Direct Google Sheet Pipeline Navigation Module -->
       <section class="options-card highlight-card">
         <div class="card-title-row">
           <div class="card-icon" style="background: rgba(52, 168, 83, 0.15); border-color: rgba(52, 168, 83, 0.35); color: #34A853;">📊</div>
@@ -91,7 +119,7 @@
         </div>
       </section>
 
-      <!-- 3. License Management & Discount Code Module -->
+      <!-- 4. License Management & Discount Code Module -->
       <section class="options-card">
         <div class="card-title-row">
           <div class="card-icon">👑</div>
@@ -137,7 +165,7 @@
         </div>
       </section>
 
-      <!-- 4. Pipeline Tags Taxonomy Manager -->
+      <!-- 5. Pipeline Tags Taxonomy Manager -->
       <section class="options-card">
         <div class="card-title-row">
           <div class="card-icon">🏷️</div>
@@ -165,7 +193,7 @@
         </div>
       </section>
 
-      <!-- 5. Pipeline Groups Manager -->
+      <!-- 6. Pipeline Groups Manager -->
       <section class="options-card">
         <div class="card-title-row">
           <div class="card-icon">📁</div>

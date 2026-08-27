@@ -1,0 +1,19 @@
+name: Display UI Guard
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  popup-display-regression-check:
+    name: Prevent global popup shrinking
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate Display Fixed V1 safeguards
+        run: npm run check:popup-ui
