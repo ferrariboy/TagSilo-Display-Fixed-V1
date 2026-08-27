@@ -755,8 +755,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const response = await chrome.runtime.sendMessage({
         action: "FETCH_EMAIL",
-        profileUrl: profileUrl
+        profileUrl
       });
+
+      if (response && response.success && response.diagnostics) {
+        console.info("[TagSilo] Background Contact Info diagnostics:", response.diagnostics);
+      }
 
       if (response && response.success) {
         const parser = new DOMParser();
@@ -1826,6 +1830,18 @@ async function extractLinkedInMetadataInPage() {
   let title = "";
   let image = "";
   let email = "";
+  const contactInfoDiagnostics = {
+    attempted: false,
+    status: null,
+    redirected: false,
+    finalPath: "",
+    contentType: "",
+    responseLength: 0,
+    containsEmailLabel: false,
+    containsMailtoLink: false,
+    emailFound: false,
+    error: ""
+  };
 
   const pause = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
   const contactInfoRootSelector = ".pv-contact-info, section.ci-email, #pv-contact-info, [data-view-name*='contact-info' i], [data-test-id*='contact-info' i]";
@@ -2244,6 +2260,7 @@ async function extractLinkedInMetadataInPage() {
     try {
       const baseUrl = location.origin + location.pathname.replace(/\/overlay\/contact-info\/?.*$/i, "").replace(/\/$/, "");
       const contactUrl = baseUrl + "/overlay/contact-info/";
+      contactInfoDiagnostics.attempted = true;
       const response = await fetch(contactUrl, {
         headers: {
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -2251,8 +2268,15 @@ async function extractLinkedInMetadataInPage() {
         },
         credentials: "include"
       });
+      contactInfoDiagnostics.status = response.status;
+      contactInfoDiagnostics.redirected = response.redirected;
+      contactInfoDiagnostics.finalPath = new URL(response.url || contactUrl).pathname;
+      contactInfoDiagnostics.contentType = response.headers.get("content-type") || "";
       if (response.ok) {
         const htmlText = await response.text();
+        contactInfoDiagnostics.responseLength = htmlText.length;
+        contactInfoDiagnostics.containsEmailLabel = /\bemail\b/i.test(htmlText);
+        contactInfoDiagnostics.containsMailtoLink = /mailto:/i.test(htmlText);
         const mailtoMatch = htmlText.match(/href=["']mailto:([^"'?]+)["']/i);
         if (mailtoMatch && mailtoMatch[1] && isUserEmail(mailtoMatch[1])) {
           email = mailtoMatch[1].trim();
@@ -2261,7 +2285,11 @@ async function extractLinkedInMetadataInPage() {
           if (found) email = found;
         }
       }
-    } catch (err) {}
+      contactInfoDiagnostics.emailFound = Boolean(email);
+    } catch (err) {
+      contactInfoDiagnostics.error = err instanceof Error ? err.message : String(err);
+    }
+    console.info("[TagSilo] Contact Info request diagnostics:", contactInfoDiagnostics);
   }
 
   // 6E. Fallback search in document text
@@ -2281,6 +2309,7 @@ async function extractLinkedInMetadataInPage() {
     image: image || "",
     avatarUrl: image || "",
     url: cleanUrl,
-    email: email || "Cannot Find"
+    email: email || "Cannot Find",
+    contactInfoDiagnostics
   };
 }

@@ -142,11 +142,29 @@ async function handleFetchContactEmail(profileUrl) {
     if (res.ok) {
       const html = await res.text();
       const email = findContactEmailInHtml(html);
-      if (email) return { html, email, status: 200, source: "fetch" };
-      return { html, email: "", status: 200, source: "fetch" };
+      const diagnostics = {
+        redirected: res.redirected,
+        finalPath: new URL(res.url || contactInfoUrl).pathname,
+        contentType: res.headers.get("content-type") || "",
+        responseLength: html.length,
+        containsEmailLabel: /\bemail\b/i.test(html),
+        containsMailtoLink: /mailto:/i.test(html)
+      };
+      if (email) return { html, email, status: res.status, source: "fetch", diagnostics };
+      return { html, email: "", status: res.status, source: "fetch", diagnostics };
     }
 
-    return { html: "", email: "", status: res.status, source: "fetch" };
+    return {
+      html: "",
+      email: "",
+      status: res.status,
+      source: "fetch",
+      diagnostics: {
+        redirected: res.redirected,
+        finalPath: new URL(res.url || contactInfoUrl).pathname,
+        contentType: res.headers.get("content-type") || ""
+      }
+    };
   } catch (err) {
     console.warn("[TagSilo Background] Overlay fetch exception:", err);
     return { html: "", email: "", error: err.message, source: "fetch" };
