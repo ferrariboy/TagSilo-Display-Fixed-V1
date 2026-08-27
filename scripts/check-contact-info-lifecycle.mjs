@@ -26,6 +26,10 @@ assert(
   "The active LinkedIn tab must not reopen the visible Contact Info dialog."
 );
 assert(
+  popupSource.includes("mergeExtractionResults") && popupSource.includes("email: usePrimary(\"email\", placeholderValues)"),
+  "A valid email from the page-context extractor must not be overwritten by a fallback result."
+);
+assert(
   popupSource.includes('action: "FETCH_EMAIL"'),
   "The popup must retain the background email-fetch fallback."
 );
@@ -49,6 +53,6 @@ assert(
   !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
   "Avatar extraction must avoid global metadata and unscoped image selectors."
 );
-assert(manifest.version === "1.3.4", "The manifest version must reflect the lifecycle fix.");
+assert(manifest.version === "1.3.5", "The manifest version must reflect the lifecycle fix.");
 
 console.log("Contact Info lifecycle checks passed.");

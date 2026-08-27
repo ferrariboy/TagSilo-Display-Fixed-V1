@@ -432,8 +432,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (profileJobTitle) profileJobTitle.textContent = "Scanning Headline...";
 
       let extracted = null;
+      const hasProfileValue = (value, placeholders = []) => {
+        const normalized = typeof value === "string" ? value.trim() : "";
+        return Boolean(normalized) && !placeholders.includes(normalized.toLowerCase());
+      };
+      const mergeExtractionResults = (primary, fallback) => {
+        if (!primary) return fallback;
+        if (!fallback) return primary;
 
-      // Tier 1: Injected In-Page Extractor (Directly pops up Contact Info modal & captures Name, Headline, Avatar, Email)
+        const usePrimary = (key, placeholders = []) =>
+          hasProfileValue(primary[key], placeholders) ? primary[key] : fallback[key];
+        const placeholderValues = ["cannot find", "unavailable", "profile member", "linkedin profile"];
+
+        return {
+          ...fallback,
+          ...primary,
+          name: usePrimary("name", placeholderValues),
+          fullName: usePrimary("fullName", placeholderValues),
+          title: usePrimary("title", placeholderValues),
+          headline: usePrimary("headline", placeholderValues),
+          jobTitle: usePrimary("jobTitle", placeholderValues),
+          image: usePrimary("image"),
+          avatarUrl: usePrimary("avatarUrl"),
+          email: usePrimary("email", placeholderValues)
+        };
+      };
+
+      // Tier 1: Main-world extractor reads the Contact Info endpoint without opening a UI overlay.
       try {
         const results = await chrome.scripting.executeScript({
           target: { tabId: activeTab.id },
@@ -452,7 +477,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         try {
           const resp = await chrome.tabs.sendMessage(activeTab.id, { action: "GET_LINKEDIN_METADATA" });
           if (resp && resp.data) {
-            extracted = resp.data;
+            extracted = mergeExtractionResults(extracted, resp.data);
           }
         } catch (msgErr) {}
       }
