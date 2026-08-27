@@ -204,14 +204,10 @@ async function extractEmail() {
 
 function getProfileAvatarUrl(profileName) {
   try {
-    const profileRoot = document.querySelector('main .pv-top-card') ||
-                        document.querySelector('main .top-card-layout') ||
-                        document.querySelector("main [data-view-name='profile-card']") ||
-                        document.querySelector('main .pv-text-details__left-panel')?.closest('section');
-    if (!profileRoot) return '';
-
     const normalizedName = (profileName || '').trim().toLowerCase();
-    const avatarSelectors = [
+    if (!normalizedName) return '';
+
+    const imageCandidates = document.querySelectorAll([
       'img.pv-top-card-profile-picture__image',
       'img.pv-top-card-profile-picture__image--show',
       'button.pv-top-card-profile-picture img',
@@ -221,24 +217,38 @@ function getProfileAvatarUrl(profileName) {
       'img.profile-photo-edit__preview',
       '.pv-top-card__non-self-photo-wrapper img',
       '.top-card-layout__entity-image',
+      'img.EntityPhoto-circle-8',
+      'img.EntityPhoto-circle-7',
+      "img[src*='profile-displayphoto']",
       "img[class*='profile-photo']",
       "img[class*='profile-picture']"
-    ];
+    ].map(selector => `main ${selector}`).join(', '));
 
-    for (const selector of avatarSelectors) {
-      for (const imageElement of profileRoot.querySelectorAll(selector)) {
-        if (imageElement.closest('.artdeco-modal, #pv-contact-info, .pv-contact-info, dialog, #global-nav, nav, header')) continue;
+    let bestCandidate = { source: '', score: 0 };
+    for (const imageElement of imageCandidates) {
+      if (imageElement.closest('.artdeco-modal, #pv-contact-info, .pv-contact-info, dialog, #global-nav, nav, header, footer')) continue;
 
-        const source = imageElement.currentSrc || imageElement.src || imageElement.getAttribute('data-delayed-url') || imageElement.getAttribute('data-src') || '';
-        if (!source || source.startsWith('data:image/svg') || source.includes('ghost') || source.includes('static.licdn.com/aero-v1/sc/h/')) continue;
+      const source = imageElement.currentSrc || imageElement.src || imageElement.getAttribute('data-delayed-url') || imageElement.getAttribute('data-src') || '';
+      if (!source || source.startsWith('data:image/svg') || source.includes('ghost') || source.includes('static.licdn.com/aero-v1/sc/h/')) continue;
 
-        const alt = (imageElement.getAttribute('alt') || '').trim().toLowerCase();
-        const describesProfilePhoto = /profile\s*(photo|picture)|photo\s*of/i.test(alt);
-        if (normalizedName && describesProfilePhoto && !alt.includes(normalizedName)) continue;
+      const alt = (imageElement.getAttribute('alt') || '').trim().toLowerCase();
+      const label = (imageElement.closest('[aria-label]')?.getAttribute('aria-label') || '').trim().toLowerCase();
+      let score = 0;
+      if (alt.includes(normalizedName) || label.includes(normalizedName)) score += 100;
+      if (source.includes('profile-displayphoto') || source.includes('/dms/image/')) score += 20;
 
-        return source;
+      let ancestor = imageElement.parentElement;
+      for (let depth = 0; ancestor && depth < 8; depth += 1, ancestor = ancestor.parentElement) {
+        const className = (ancestor.className || '').toString().toLowerCase();
+        const context = (ancestor.innerText || '').slice(0, 800).toLowerCase();
+        if (className.includes('pv-top-card') || className.includes('top-card-layout') || className.includes('profile-topcard')) score += 60;
+        if (context.includes(normalizedName)) score += 35;
       }
+
+      if (score > bestCandidate.score) bestCandidate = { source, score };
     }
+
+    return bestCandidate.score >= 35 ? bestCandidate.source : '';
   } catch (error) {
     console.warn('[TagSilo] Profile avatar extraction note:', error);
   }
@@ -283,7 +293,7 @@ let isCapturing = false;
 
 async function tryCapture(retries = 10) {
   if (isCapturing) return;
-  if (!location.pathname.includes('/in/')) return;
+  if (!location.pathname.includes('/in/') || /\/overlay\/contact-info\/?$/i.test(location.pathname)) return;
 
   isCapturing = true;
   try {
@@ -334,6 +344,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true, data: data });
     });
     return true; // Keep message channel open for async response
+  }
+  if (request.action === 'GET_CONTACT_INFO_EMAIL') {
+    extractEmail().then((email) => {
+      sendResponse({ success: true, email: email || 'Cannot Find' });
+    }).catch((error) => {
+      sendResponse({ success: false, error: error.message, email: 'Cannot Find' });
+    });
+    return true;
   }
   return true;
 });
