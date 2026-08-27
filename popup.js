@@ -498,8 +498,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         console.log("[TagSilo Pro] Extracted profile data:", JSON.stringify(extracted, null, 2));
 
-        // Apply extracted fields onto UI grid
-        applyExtractedProfile(extracted, true);
+        // A managed Contact Info check has already completed at this point. Do not
+        // leave the UI in the live “Searching…” state when that check found no email.
+        const managedEmailLookupCompleted = extracted.contactInfoDiagnostics?.source === "managed-contact-info-dialog";
+        applyExtractedProfile(extracted, !managedEmailLookupCompleted);
 
         // Save dataset immediately to browser local memory
         if (extracted.fullName || extracted.name) {
@@ -2218,14 +2220,19 @@ async function extractLinkedInMetadataInPage() {
       : findEmailInText(root?.innerText || root?.textContent || root?.innerHTML || "");
   };
 
-  const waitForContactInfoDialog = async (expectedPath, timeoutMs = 1800) => {
+  const waitForContactInfoEmail = async (expectedPath, timeoutMs = 4500) => {
     const deadline = Date.now() + timeoutMs;
+    let lastDialog = null;
     while (Date.now() < deadline) {
       const dialog = getContactInfoDialog();
-      if (dialog && window.location.pathname.replace(/\/$/, "") === expectedPath) return dialog;
+      if (dialog && window.location.pathname.replace(/\/$/, "") === expectedPath) {
+        lastDialog = dialog;
+        const foundEmail = readEmailFromContactInfo(dialog.root);
+        if (foundEmail) return { dialog, email: foundEmail };
+      }
       await pause(75);
     }
-    return null;
+    return { dialog: lastDialog, email: "" };
   };
 
   const restoreContactInfoRoute = async (expectedPath) => {
@@ -2276,8 +2283,8 @@ async function extractLinkedInMetadataInPage() {
 
         contactLink.click();
         openedByThisRun = true;
-        const mountedDialog = await waitForContactInfoDialog(expectedPath);
-        return mountedDialog ? readEmailFromContactInfo(mountedDialog.root) : "";
+        const result = await waitForContactInfoEmail(expectedPath);
+        return result.email;
       } catch (error) {
         console.warn("[TagSilo] Managed Contact Info read note:", error);
         return "";

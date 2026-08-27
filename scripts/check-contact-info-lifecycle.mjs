@@ -22,7 +22,7 @@ assert(
   "The stale overlay recovery must include a route-level fallback when LinkedIn does not respond to its dismiss control."
 );
 assert(
-  popupSource.includes("readEmailViaManagedContactInfoDialog") && popupSource.includes("window.__tagsiloContactInfoJob"),
+  popupSource.includes("readEmailViaManagedContactInfoDialog") && popupSource.includes("waitForContactInfoEmail") && popupSource.includes("window.__tagsiloContactInfoJob"),
   "The Contact Info dialog must be coordinated as a single per-tab transaction."
 );
 assert(
@@ -32,6 +32,10 @@ assert(
 assert(
   popupSource.includes("finally") && popupSource.includes("restoreContactInfoRoute(expectedPath)"),
   "Every Contact Info read must restore the profile route even when the popup closes or the email is absent."
+);
+assert(
+  popupSource.includes("managedEmailLookupCompleted") && popupSource.includes("applyExtractedProfile(extracted, !managedEmailLookupCompleted)"),
+  "A completed managed email lookup must resolve the popup UI rather than leaving it in a searching state."
 );
 assert(
   popupSource.includes("mergeExtractionResults") && popupSource.includes("email: usePrimary(\"email\", placeholderValues)"),
@@ -65,6 +69,6 @@ assert(
   !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
   "Avatar extraction must avoid global metadata and unscoped image selectors."
 );
-assert(manifest.version === "1.3.7", "The manifest version must reflect the lifecycle fix.");
+assert(manifest.version === "1.3.8", "The manifest version must reflect the lifecycle fix.");
 
 console.log("Contact Info lifecycle checks passed.");
