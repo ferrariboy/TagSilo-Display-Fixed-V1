@@ -21,8 +21,8 @@ assert(
   "The stale overlay recovery must include a route-level fallback when LinkedIn does not respond to its dismiss control."
 );
 assert(
-  !popupSource.includes("contactBtn.click()"),
-  "The popup injector must never click LinkedIn's Contact Info control."
+  popupSource.includes("openedByTagSilo") && popupSource.includes("finally"),
+  "The managed Contact Info fallback must always close the dialog it opens."
 );
 assert(
   popupSource.includes('action: "FETCH_EMAIL"'),
@@ -32,6 +32,18 @@ assert(
   backgroundSource.includes("handleFetchContactEmail") && backgroundSource.includes("/overlay/contact-info/"),
   "The service worker must retain the silent Contact Info endpoint fetcher."
 );
-assert(manifest.version === "1.3.1", "The manifest version must reflect the lifecycle fix.");
+assert(
+  backgroundSource.includes("findContactEmailInHtml") && popupSource.includes("response.email"),
+  "The silent Contact Info path must parse visible email text, not only mailto links."
+);
+assert(
+  popupSource.includes("const getProfileAvatarUrl") && popupSource.includes("const profileRoot = document.querySelector"),
+  "Avatar extraction must be constrained to the active profile card."
+);
+assert(
+  !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
+  "Avatar extraction must avoid global metadata and unscoped image selectors."
+);
+assert(manifest.version === "1.3.2", "The manifest version must reflect the lifecycle fix.");
 
 console.log("Contact Info lifecycle checks passed.");

@@ -736,6 +736,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         const parser = new DOMParser();
         const doc = parser.parseFromString(response.html, "text/html");
 
+        const genericMatch = (doc.body?.textContent || response.html).match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+        const parsedEmail = response.email || genericMatch?.[1] || "";
+        if (parsedEmail && !/@(?:linkedin|licdn|example)\.com$/i.test(parsedEmail) && !/^(support|info|help|no-reply|donotreply)@/i.test(parsedEmail)) {
+          currentExtractedEmail = parsedEmail.trim();
+          updateEmailBadge(currentExtractedEmail, false);
+          if (leadEmailInput) leadEmailInput.value = `Email: ${currentExtractedEmail}`;
+          await cacheProfileData({ email: currentExtractedEmail });
+          return currentExtractedEmail;
+        }
+
         const mailtoLink = doc.querySelector('a[href^="mailto:"]');
         if (mailtoLink) {
           const emailText = mailtoLink.innerText.trim() || mailtoLink.getAttribute("href").replace(/^mailto:/i, "").trim();
@@ -1792,6 +1802,76 @@ async function extractLinkedInMetadataInPage() {
   let email = "";
 
   const pause = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs));
+  const contactInfoRootSelector = ".pv-contact-info, section.ci-email, #pv-contact-info, [data-view-name*='contact-info' i], [data-test-id*='contact-info' i]";
+  const getContactInfoRoot = () => document.querySelector(contactInfoRootSelector);
+
+  const closeTagSiloContactInfoOverlay = async () => {
+    const contactInfoRoot = getContactInfoRoot();
+    const dialog = contactInfoRoot?.closest(".artdeco-modal, [role='dialog'], dialog") || contactInfoRoot;
+    const dismissButton = dialog?.querySelector(
+      "button[aria-label*='dismiss' i], button[aria-label*='close' i], .artdeco-modal__dismiss, button[data-test-modal-close-btn]"
+    );
+
+    if (dismissButton instanceof HTMLElement) {
+      dismissButton.click();
+      await pause(100);
+    }
+
+    if (getContactInfoRoot()) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true }));
+      await pause(100);
+    }
+
+    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
+      window.history.back();
+      await pause(175);
+    }
+  };
+
+  const getProfileAvatarUrl = (profileName) => {
+    try {
+      const profileRoot = document.querySelector("main .pv-top-card") ||
+                          document.querySelector("main .top-card-layout") ||
+                          document.querySelector("main [data-view-name='profile-card']") ||
+                          document.querySelector("main .pv-text-details__left-panel")?.closest("section");
+      if (!profileRoot) return "";
+
+      const normalizedName = (profileName || "").trim().toLowerCase();
+      const avatarSelectors = [
+        "img.pv-top-card-profile-picture__image",
+        "img.pv-top-card-profile-picture__image--show",
+        "button.pv-top-card-profile-picture img",
+        "button[aria-label*='profile picture' i] img",
+        "button[aria-label*='photo' i] img",
+        "img.pv-top-card__photo",
+        "img.profile-photo-edit__preview",
+        ".pv-top-card__non-self-photo-wrapper img",
+        ".top-card-layout__entity-image",
+        "img[class*='profile-photo']",
+        "img[class*='profile-picture']"
+      ];
+
+      for (const selector of avatarSelectors) {
+        for (const imageElement of profileRoot.querySelectorAll(selector)) {
+          if (imageElement.closest(".artdeco-modal, #pv-contact-info, .pv-contact-info, dialog, #global-nav, nav, header")) continue;
+
+          const source = imageElement.currentSrc || imageElement.src || imageElement.getAttribute("data-delayed-url") || imageElement.getAttribute("data-src") || "";
+          if (!source || source.startsWith("data:image/svg") || source.includes("ghost") || source.includes("static.licdn.com/aero-v1/sc/h/")) continue;
+
+          const alt = (imageElement.getAttribute("alt") || "").trim().toLowerCase();
+          const describesProfilePhoto = /profile\s*(photo|picture)|photo\s*of/i.test(alt);
+          if (normalizedName && describesProfilePhoto && !alt.includes(normalizedName)) continue;
+
+          return source;
+        }
+      }
+    } catch (error) {
+      console.warn("[TagSilo] Profile avatar extraction note:", error);
+    }
+
+    return "";
+  };
 
   /**
    * Recover from a contact-info overlay left open by an earlier extension build.
@@ -1803,29 +1883,7 @@ async function extractLinkedInMetadataInPage() {
     const isContactInfoRoute = /\/overlay\/contact-info\/?$/i.test(window.location.pathname);
     if (!isContactInfoRoute) return false;
 
-    const contactInfoRoot = document.querySelector(
-      ".pv-contact-info, #pv-contact-info, [data-view-name*='contact-info' i], [data-test-id*='contact-info' i]"
-    );
-    const dialog = contactInfoRoot?.closest(".artdeco-modal, [role='dialog'], dialog") || contactInfoRoot;
-    const dismissButton = dialog?.querySelector(
-      "button[aria-label*='dismiss' i], button[aria-label*='close' i], .artdeco-modal__dismiss, button[data-test-modal-close-btn]"
-    );
-
-    if (dismissButton instanceof HTMLElement) {
-      dismissButton.click();
-      await pause(100);
-    }
-
-    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-      document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true }));
-      await pause(100);
-    }
-
-    if (/\/overlay\/contact-info\/?$/i.test(window.location.pathname)) {
-      window.history.back();
-      await pause(175);
-    }
+    await closeTagSiloContactInfoOverlay();
 
     return !/\/overlay\/contact-info\/?$/i.test(window.location.pathname);
   };
@@ -1836,66 +1894,7 @@ async function extractLinkedInMetadataInPage() {
   await closeStaleTagSiloContactInfoOverlay();
 
   // -------------------------------------------------------------
-  // STEP 1: AVATAR IMAGE EXTRACTION (FROM MAIN PROFILE TOP CARD FIRST)
-  // Scraped immediately from main profile DOM before touching any modal.
-  // -------------------------------------------------------------
-  try {
-    // A. Meta tags in main page head
-    const ogImg = document.querySelector('meta[property="og:image"]')?.getAttribute("content") ||
-                  document.querySelector('meta[name="image"]')?.getAttribute("content") ||
-                  document.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
-    if (ogImg && !ogImg.includes("static.licdn.com/aero-v1/sc/h/") && !ogImg.includes("ghost") && !ogImg.includes("data:image")) {
-      image = ogImg;
-    }
-
-    // B. Direct top-card profile image element selectors on main profile page
-    if (!image) {
-      const isModal = (el) => el.closest(".artdeco-modal") || el.closest("#pv-contact-info") || el.closest(".pv-contact-info") || el.closest("dialog") || el.closest("#global-nav");
-      
-      const topImg = document.querySelector("img.pv-top-card-profile-picture__image") ||
-                     document.querySelector("img.pv-top-card-profile-picture__image--show") ||
-                     document.querySelector("button.pv-top-card-profile-picture img") ||
-                     document.querySelector("button[aria-label*='profile picture' i] img") ||
-                     document.querySelector("button[aria-label*='photo' i] img") ||
-                     document.querySelector("img.profile-photo-edit__preview") ||
-                     document.querySelector("img.pv-top-card__photo") ||
-                     document.querySelector("img.EntityPhoto-profile-3") ||
-                     document.querySelector("img.EntityPhoto-profile-4") ||
-                     document.querySelector("img.presence-entity__image") ||
-                     document.querySelector(".pv-top-card__non-self-photo-wrapper img") ||
-                     document.querySelector(".top-card-layout__entity-image") ||
-                     document.querySelector("img[alt*='profile' i]") ||
-                     document.querySelector("img[alt*='photo' i]");
-
-      if (topImg && !isModal(topImg)) {
-        const srcVal = topImg.src || topImg.getAttribute("data-delayed-url") || topImg.getAttribute("data-src") || "";
-        if (srcVal && !srcVal.startsWith("data:image/svg") && !srcVal.includes("ghost") && !srcVal.includes("static.licdn.com/aero-v1/sc/h/")) {
-          image = srcVal;
-        }
-      }
-
-      // C. Fallback: Search any image inside the main top-card
-      if (!image) {
-        const mainCard = document.querySelector("main section.artdeco-card, .pv-top-card, .ph5, .top-card-layout");
-        if (mainCard) {
-          const imgs = mainCard.querySelectorAll("img");
-          for (const imgEl of imgs) {
-            if (isModal(imgEl)) continue;
-            const srcVal = imgEl.src || imgEl.getAttribute("data-delayed-url") || imgEl.getAttribute("data-src") || "";
-            if (srcVal && (srcVal.includes("media.licdn.com/dms/image/") || srcVal.includes("profile-displayphoto")) && !srcVal.includes("ghost")) {
-              image = srcVal;
-              break;
-            }
-          }
-        }
-      }
-    }
-  } catch (imgErr) {
-    console.warn("[TagSilo] Main page avatar extraction note:", imgErr);
-  }
-
-  // -------------------------------------------------------------
-  // STEP 2: HEADLINE & NAME EXTRACTION (DOM & VISUAL HIERARCHY)
+  // STEP 1: HEADLINE & NAME EXTRACTION (DOM & VISUAL HIERARCHY)
   // -------------------------------------------------------------
   try {
     const nameEl = document.querySelector("h1.text-heading-xlarge") ||
@@ -2090,6 +2089,11 @@ async function extractLinkedInMetadataInPage() {
     } catch (e) {}
   }
 
+  // Resolve the avatar only after the active profile's name is known. The DOM scope
+  // is the profile top card; global Open Graph, recommendation, and overlay images
+  // are deliberately excluded rather than risking a wrong person's photo.
+  image = getProfileAvatarUrl(name);
+
   // -------------------------------------------------------------
   // LAYER 4B: BACKGROUND FETCH OF CANONICAL URL (GUARANTEED BACKSTOP)
   // -------------------------------------------------------------
@@ -2221,7 +2225,54 @@ async function extractLinkedInMetadataInPage() {
     } catch (err) {}
   }
 
-  // 6E. Fallback search in document text
+  // 6E. Some LinkedIn sessions expose an email only after Contact Info mounts in
+  // the page. This is a managed, short-lived fallback: TagSilo clicks exactly that
+  // control, reads the dialog, and closes it in finally whether email exists or not.
+  if (!email) {
+    let openedByTagSilo = false;
+    try {
+      const alreadyOpen = getContactInfoRoot();
+      if (alreadyOpen) {
+        const mailto = alreadyOpen.querySelector('a[href^="mailto:"]');
+        const raw = mailto?.href.replace(/^mailto:/i, "").split("?")[0].trim() || "";
+        email = isUserEmail(raw) ? raw : (findEmailInText(alreadyOpen.innerText || alreadyOpen.textContent || alreadyOpen.innerHTML || "") || email);
+      } else {
+        const contactControl = Array.from(document.querySelectorAll(
+          "main a[href*='/overlay/contact-info/'], main a#top-card-text-details-contact-info, main a[data-control-name='contact_see_more'], main button[aria-label*='contact info' i], main [role='button'][aria-label*='contact info' i]"
+        )).find((element) => {
+          const text = (element.innerText || element.textContent || "").trim().toLowerCase();
+          const href = (element.getAttribute("href") || "").toLowerCase();
+          return href.includes("/overlay/contact-info/") || text === "contact info" || text.startsWith("contact info ");
+        });
+
+        if (contactControl instanceof HTMLElement) {
+          contactControl.click();
+          openedByTagSilo = true;
+
+          const deadline = Date.now() + 1800;
+          while (Date.now() < deadline) {
+            await pause(75);
+            const mountedContactInfo = getContactInfoRoot();
+            if (!mountedContactInfo) continue;
+
+            const mailto = mountedContactInfo.querySelector('a[href^="mailto:"]');
+            const raw = mailto?.href.replace(/^mailto:/i, "").split("?")[0].trim() || "";
+            const found = isUserEmail(raw) ? raw : findEmailInText(mountedContactInfo.innerText || mountedContactInfo.textContent || mountedContactInfo.innerHTML || "");
+            if (found) {
+              email = found;
+              break;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("[TagSilo] Managed contact-info fallback note:", error);
+    } finally {
+      if (openedByTagSilo) await closeTagSiloContactInfoOverlay();
+    }
+  }
+
+  // 6F. Fallback search in document text
   if (!email && document.body) {
     try {
       const found = findEmailInText(document.body.innerText || document.body.innerHTML || "");

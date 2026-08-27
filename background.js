@@ -5,6 +5,21 @@
  */
 
 const DEFAULT_BACKEND_ENDPOINT = "https://tagsilo.vercel.app";
+const CONTACT_EMAIL_PATTERN = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+
+function findContactEmailInHtml(html) {
+  if (!html || typeof html !== "string") return "";
+
+  const normalized = html.replace(/&commat;/gi, "@").replace(/&#64;/gi, "@");
+  const matches = normalized.match(CONTACT_EMAIL_PATTERN) || [];
+  return matches.find((candidate) => {
+    const email = candidate.trim().toLowerCase();
+    return !email.endsWith("@linkedin.com") &&
+      !email.endsWith("@licdn.com") &&
+      !email.endsWith("@example.com") &&
+      !/^(support|info|help|no-reply|donotreply)@/.test(email);
+  }) || "";
+}
 
 // Initialize default storage on installation without overwriting user data
 chrome.runtime.onInstalled.addListener(async () => {
@@ -129,7 +144,7 @@ async function handleFetchContactEmail(profileUrl) {
     }
 
     const html = await res.text();
-    return { html, status: 200 };
+    return { html, email: findContactEmailInHtml(html), status: 200 };
   } catch (err) {
     console.warn("[TagSilo Background] Overlay fetch exception:", err);
     return { html: "", error: err.message };

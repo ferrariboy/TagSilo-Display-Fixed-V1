@@ -202,6 +202,50 @@ async function extractEmail() {
   return email || 'Cannot Find';
 }
 
+function getProfileAvatarUrl(profileName) {
+  try {
+    const profileRoot = document.querySelector('main .pv-top-card') ||
+                        document.querySelector('main .top-card-layout') ||
+                        document.querySelector("main [data-view-name='profile-card']") ||
+                        document.querySelector('main .pv-text-details__left-panel')?.closest('section');
+    if (!profileRoot) return '';
+
+    const normalizedName = (profileName || '').trim().toLowerCase();
+    const avatarSelectors = [
+      'img.pv-top-card-profile-picture__image',
+      'img.pv-top-card-profile-picture__image--show',
+      'button.pv-top-card-profile-picture img',
+      "button[aria-label*='profile picture' i] img",
+      "button[aria-label*='photo' i] img",
+      'img.pv-top-card__photo',
+      'img.profile-photo-edit__preview',
+      '.pv-top-card__non-self-photo-wrapper img',
+      '.top-card-layout__entity-image',
+      "img[class*='profile-photo']",
+      "img[class*='profile-picture']"
+    ];
+
+    for (const selector of avatarSelectors) {
+      for (const imageElement of profileRoot.querySelectorAll(selector)) {
+        if (imageElement.closest('.artdeco-modal, #pv-contact-info, .pv-contact-info, dialog, #global-nav, nav, header')) continue;
+
+        const source = imageElement.currentSrc || imageElement.src || imageElement.getAttribute('data-delayed-url') || imageElement.getAttribute('data-src') || '';
+        if (!source || source.startsWith('data:image/svg') || source.includes('ghost') || source.includes('static.licdn.com/aero-v1/sc/h/')) continue;
+
+        const alt = (imageElement.getAttribute('alt') || '').trim().toLowerCase();
+        const describesProfilePhoto = /profile\s*(photo|picture)|photo\s*of/i.test(alt);
+        if (normalizedName && describesProfilePhoto && !alt.includes(normalizedName)) continue;
+
+        return source;
+      }
+    }
+  } catch (error) {
+    console.warn('[TagSilo] Profile avatar extraction note:', error);
+  }
+
+  return '';
+}
+
 async function extractProfileDetails() {
   const cleanUrl = location.href.split('?')[0].split('#')[0].replace(/\/overlay\/contact-info\/?.*$/i, '').replace(/\/$/, '');
   
@@ -215,34 +259,9 @@ async function extractProfileDetails() {
 
   const headline = extractHeadline(name) || '';
 
-  let image = '';
-  try {
-    const isModalOrNav = (el) => {
-      if (!el) return true;
-      if (el.closest('.artdeco-modal') || el.closest('#pv-contact-info') || el.closest('.pv-contact-info') || el.closest('dialog') || el.closest('#global-nav') || el.closest('nav') || el.closest('header') || el.closest('footer')) return true;
-      return false;
-    };
-
-    const ogImg = document.querySelector('meta[property="og:image"]')?.getAttribute('content') ||
-                  document.querySelector('meta[name="image"]')?.getAttribute('content') ||
-                  document.querySelector('meta[name="twitter:image"]')?.getAttribute('content');
-    if (ogImg && !ogImg.includes('static.licdn.com/aero-v1/sc/h/') && !ogImg.includes('ghost') && !ogImg.includes('data:image')) {
-      image = ogImg;
-    }
-
-    if (!image) {
-      const sel = "img.pv-top-card-profile-picture__image, img.pv-top-card-profile-picture__image--show, button.pv-top-card-profile-picture img, button[aria-label*='profile picture' i] img, button[aria-label*='photo' i] img, img.profile-photo-edit__preview, img.pv-top-card__photo, img.EntityPhoto-profile-3, img.EntityPhoto-profile-4, img.presence-entity__image, .pv-top-card__non-self-photo-wrapper img, .top-card-layout__entity-image, .pv-top-card--photo img, img[class*='pv-top-card'], img[class*='profile-photo'], img[class*='profile-picture']";
-      const candidates = document.querySelectorAll(sel);
-      for (const el of candidates) {
-        if (isModalOrNav(el)) continue;
-        const srcVal = el.src || el.getAttribute('data-delayed-url') || el.getAttribute('data-src') || '';
-        if (srcVal && !srcVal.startsWith('data:image/svg') && !srcVal.includes('ghost') && !srcVal.includes('static.licdn.com/aero-v1/sc/h/')) {
-          image = srcVal;
-          break;
-        }
-      }
-    }
-  } catch (e) {}
+  // Do not use global Open Graph or generic profile-image selectors here: both can
+  // belong to a recommendation card or a previously opened LinkedIn overlay.
+  const image = getProfileAvatarUrl(name);
 
   const email = await extractEmail();
 
