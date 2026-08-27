@@ -22,16 +22,24 @@ assert(
   "The stale overlay recovery must include a route-level fallback when LinkedIn does not respond to its dismiss control."
 );
 assert(
-  !popupSource.includes("contactControl.click()") && !popupSource.includes("openedByTagSilo"),
-  "The active LinkedIn tab must not reopen the visible Contact Info dialog."
+  popupSource.includes("readEmailViaManagedContactInfoDialog") && popupSource.includes("window.__tagsiloContactInfoJob"),
+  "The Contact Info dialog must be coordinated as a single per-tab transaction."
+);
+assert(
+  popupSource.includes("linkPath === expectedPath") && popupSource.includes("!anchor.querySelector(\"img, picture, svg\")"),
+  "The modal trigger must target only the exact Contact Info link and never a profile image control."
+);
+assert(
+  popupSource.includes("finally") && popupSource.includes("restoreContactInfoRoute(expectedPath)"),
+  "Every Contact Info read must restore the profile route even when the popup closes or the email is absent."
 );
 assert(
   popupSource.includes("mergeExtractionResults") && popupSource.includes("email: usePrimary(\"email\", placeholderValues)"),
   "A valid email from the page-context extractor must not be overwritten by a fallback result."
 );
 assert(
-  popupSource.includes("Contact Info request diagnostics") && popupSource.includes("Background Contact Info diagnostics") && backgroundSource.includes("responseLength"),
-  "Both direct and background Contact Info requests must emit privacy-preserving response diagnostics."
+  !popupSource.includes("chrome.tabs.create({ url: contactInfoUrl") && !backgroundSource.includes("readContactEmailInInactiveTab"),
+  "The Contact Info read must not create a secondary browser tab."
 );
 assert(
   popupSource.includes('action: "FETCH_EMAIL"'),
@@ -57,6 +65,6 @@ assert(
   !popupSource.includes('document.querySelector(\'meta[property="og:image"]\')') && !popupSource.includes('document.querySelector("img[alt*='),
   "Avatar extraction must avoid global metadata and unscoped image selectors."
 );
-assert(manifest.version === "1.3.6", "The manifest version must reflect the lifecycle fix.");
+assert(manifest.version === "1.3.7", "The manifest version must reflect the lifecycle fix.");
 
 console.log("Contact Info lifecycle checks passed.");

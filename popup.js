@@ -509,12 +509,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         // Check if this profile URL is already saved via Backend API
         await checkDuplicateProfile(cleanUrl);
 
-        // If email was not located via in-page scan, trigger secondary background overlay fetcher
-        if (!extracted.email || extracted.email === "Cannot Find" || extracted.email === "Unavailable") {
-          if (cleanUrl.includes("/in/")) {
-            fetchOverlayContactEmail(cleanUrl);
-          }
-        }
       } else {
         setScanStatus("LinkedIn Page", false);
         if (profileJobTitle && profileJobTitle.textContent === "Scanning Headline...") {
@@ -2209,6 +2203,99 @@ async function extractLinkedInMetadataInPage() {
     return "";
   };
 
+  const getContactInfoDialog = () => {
+    const root = getContactInfoRoot();
+    if (!root) return null;
+    const dialog = root.closest(".artdeco-modal, [role='dialog'], dialog") || root;
+    return { root, dialog };
+  };
+
+  const readEmailFromContactInfo = (root) => {
+    const mailto = root?.querySelector('a[href^="mailto:"]');
+    const raw = mailto?.href.replace(/^mailto:/i, "").split("?")[0].trim() || "";
+    return isUserEmail(raw)
+      ? raw
+      : findEmailInText(root?.innerText || root?.textContent || root?.innerHTML || "");
+  };
+
+  const waitForContactInfoDialog = async (expectedPath, timeoutMs = 1800) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const dialog = getContactInfoDialog();
+      if (dialog && window.location.pathname.replace(/\/$/, "") === expectedPath) return dialog;
+      await pause(75);
+    }
+    return null;
+  };
+
+  const restoreContactInfoRoute = async (expectedPath) => {
+    const dialog = getContactInfoDialog();
+    if (dialog && window.location.pathname.replace(/\/$/, "") === expectedPath) {
+      const dismissButton = dialog.dialog.querySelector(
+        "button[aria-label*='dismiss' i], button[aria-label*='close' i], .artdeco-modal__dismiss, button[data-test-modal-close-btn]"
+      );
+      if (dismissButton instanceof HTMLElement) {
+        dismissButton.click();
+        await pause(125);
+      }
+    }
+
+    if (window.location.pathname.replace(/\/$/, "") === expectedPath) {
+      window.history.back();
+      await pause(175);
+    }
+  };
+
+  const readEmailViaManagedContactInfoDialog = async () => {
+    const originalPath = window.location.pathname.replace(/\/overlay\/contact-info\/?$/i, "").replace(/\/$/, "");
+    const expectedPath = `${originalPath}/overlay/contact-info`;
+    const existingJob = window.__tagsiloContactInfoJob;
+
+    if (existingJob?.profilePath === originalPath && existingJob.promise) {
+      return existingJob.promise;
+    }
+
+    let jobRecord;
+    const run = async () => {
+      let openedByThisRun = false;
+      try {
+        const alreadyOpen = getContactInfoDialog();
+        if (alreadyOpen && window.location.pathname.replace(/\/$/, "") === expectedPath) {
+          return readEmailFromContactInfo(alreadyOpen.root);
+        }
+
+        const contactLink = Array.from(document.querySelectorAll("main a[href]")).find((anchor) => {
+          try {
+            const linkPath = new URL(anchor.href, window.location.origin).pathname.replace(/\/$/, "");
+            return linkPath === expectedPath && !anchor.closest("button") && !anchor.querySelector("img, picture, svg");
+          } catch (error) {
+            return false;
+          }
+        });
+        if (!(contactLink instanceof HTMLElement)) return "";
+
+        contactLink.click();
+        openedByThisRun = true;
+        const mountedDialog = await waitForContactInfoDialog(expectedPath);
+        return mountedDialog ? readEmailFromContactInfo(mountedDialog.root) : "";
+      } catch (error) {
+        console.warn("[TagSilo] Managed Contact Info read note:", error);
+        return "";
+      } finally {
+        if (openedByThisRun) await restoreContactInfoRoute(expectedPath);
+      }
+    };
+
+    const promise = run();
+    jobRecord = { profilePath: originalPath, promise };
+    window.__tagsiloContactInfoJob = jobRecord;
+    try {
+      return await promise;
+    } finally {
+      if (window.__tagsiloContactInfoJob === jobRecord) delete window.__tagsiloContactInfoJob;
+    }
+  };
+
   try {
     const mailtoLinks = document.querySelectorAll('a[href^="mailto:"]');
     for (const a of mailtoLinks) {
@@ -2254,42 +2341,14 @@ async function extractLinkedInMetadataInPage() {
     }
   }
 
-  // 6D. Silent contact-info endpoint fetch fallback. This performs no clicks,
-  // navigation, or DOM mutations in the LinkedIn tab.
+  // 6D. A user-visible, managed Contact Info read. This uses only the exact
+  // profile Contact Info anchor and keeps the entire operation alive in the
+  // LinkedIn tab even when the extension popup is closed or reopened.
   if (!email && location.hostname.includes("linkedin.com") && location.pathname.includes("/in/")) {
-    try {
-      const baseUrl = location.origin + location.pathname.replace(/\/overlay\/contact-info\/?.*$/i, "").replace(/\/$/, "");
-      const contactUrl = baseUrl + "/overlay/contact-info/";
-      contactInfoDiagnostics.attempted = true;
-      const response = await fetch(contactUrl, {
-        headers: {
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        credentials: "include"
-      });
-      contactInfoDiagnostics.status = response.status;
-      contactInfoDiagnostics.redirected = response.redirected;
-      contactInfoDiagnostics.finalPath = new URL(response.url || contactUrl).pathname;
-      contactInfoDiagnostics.contentType = response.headers.get("content-type") || "";
-      if (response.ok) {
-        const htmlText = await response.text();
-        contactInfoDiagnostics.responseLength = htmlText.length;
-        contactInfoDiagnostics.containsEmailLabel = /\bemail\b/i.test(htmlText);
-        contactInfoDiagnostics.containsMailtoLink = /mailto:/i.test(htmlText);
-        const mailtoMatch = htmlText.match(/href=["']mailto:([^"'?]+)["']/i);
-        if (mailtoMatch && mailtoMatch[1] && isUserEmail(mailtoMatch[1])) {
-          email = mailtoMatch[1].trim();
-        } else {
-          const found = findEmailInText(htmlText);
-          if (found) email = found;
-        }
-      }
-      contactInfoDiagnostics.emailFound = Boolean(email);
-    } catch (err) {
-      contactInfoDiagnostics.error = err instanceof Error ? err.message : String(err);
-    }
-    console.info("[TagSilo] Contact Info request diagnostics:", contactInfoDiagnostics);
+    contactInfoDiagnostics.attempted = true;
+    email = await readEmailViaManagedContactInfoDialog();
+    contactInfoDiagnostics.emailFound = Boolean(email);
+    contactInfoDiagnostics.source = "managed-contact-info-dialog";
   }
 
   // 6E. Fallback search in document text
